@@ -249,6 +249,28 @@ def prop_value(ctx: Context, odds: pd.DataFrame) -> pd.DataFrame:
     return evaluate(df, ctx.cfg["value"]["model_weight_props"], ctx.cfg["value"])
 
 
+def recent_prop_snapshot(ctx: Context):
+    """Prop prices bought earlier today (e.g. the NFL morning run) are reused by later runs the same day,
+    so the same games aren't paid for twice. Controlled by odds.reuse_props_hours: {nfl: 12}."""
+    import glob
+    from pathlib import Path
+    hours = (ctx.cfg["odds"].get("reuse_props_hours") or {}).get(ctx.sport)
+    if not hours:
+        return None
+    files = sorted(glob.glob(str(Path(ctx.cfg["general"]["output_dir"]) / "odds_snapshots" / f"{ctx.sport}_props_*.csv")))
+    if not files:
+        return None
+    ts = pd.Timestamp(Path(files[-1]).stem.split("_")[-1]).tz_localize("UTC")
+    now = _now()
+    if now - ts > pd.Timedelta(hours=float(hours)) or \
+            ts.tz_convert("America/Toronto").date() != now.tz_convert("America/Toronto").date():
+        return None
+    from .data.odds import COLS
+    df = pd.read_csv(files[-1])
+    df["player"] = df["player"].where(df["player"].notna(), None)
+    return df[[c for c in COLS if c in df]], ts.tz_convert("America/Toronto").strftime("%-I:%M %p")
+
+
 def fetch_odds(ctx: Context, provider, kind: str, demo: bool, lines_csv: str | None = None) -> pd.DataFrame:
     from .data.odds import COLS, OddsClient, et_date, load_manual_lines
     frames = []
@@ -270,6 +292,10 @@ def fetch_odds(ctx: Context, provider, kind: str, demo: bool, lines_csv: str | N
             print(f"  ({ctx.sport.upper()} prop odds only pulled on {', '.join(days)} to save credits)", file=sys.stderr)
         elif ctx.sport not in enabled:
             print(f"  ({ctx.sport.upper()} odds turned off in config: projections only)", file=sys.stderr)
+        elif kind == "props" and recent_prop_snapshot(ctx) is not None:
+            snap, when = recent_prop_snapshot(ctx)
+            frames.append(snap)
+            print(f"  {ctx.sport.upper()} prop odds: reusing today's {when} prices (no credits used)", file=sys.stderr)
         elif oc.available:
             try:
                 teams = set(ctx.slate["home"]) | set(ctx.slate["away"])

@@ -142,7 +142,8 @@ def build_site(cfg: dict, out: str, date=None, sports=("nfl", "nba"), demo: bool
     if password and enc.exists():
         picks.parent.mkdir(parents=True, exist_ok=True)
         picks.write_bytes(decrypt_bytes(enc.read_bytes(), password))
-    lock = (lambda h: lock_page(h, password)) if password else (lambda h: h)
+    build_salt = os.urandom(16)  # one salt per build: the key is derived once, then every page opens instantly
+    lock = (lambda h: lock_page(h, password, salt=build_salt)) if password else (lambda h: h)
     for sport in sports:
         print(f"== building {sport.upper()} {date.date()}", file=sys.stderr)
         try:
