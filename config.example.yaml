@@ -1,0 +1,25 @@
+# Copy to config.yaml and change only what you need; everything else uses defaults
+# (see sportsedge/config.py for every setting and what it does).
+
+odds:
+  regions: us            # "us,eu" adds Pinnacle (sharp reference) but doubles API credit use
+  # bookmakers: draftkings,fanduel,betmgm,pinnacle   # overrides regions if set
+
+value:
+  min_ev: 0.03           # only flag BET at 3%+ expected value
+  kelly_fraction: 0.25
+  max_stake_pct: 0.02
+  model_weight_props: 0.35
+  model_weight_games: 0.20
+
+nhl:
+  goalie_shrink_shots: 1500
+  # paste the "alpha" suggestion printed by `sportsedge backtest nhl` here:
+  # alpha: {sog: 0.05, attempts: 0.07, goals: 0.02, assists: 0.03, points: 0.05, hits: 0.13}
+
+nba:
+  home_court_pts: 2.3
+  # from `sportsedge backtest nba` output:
+  # total_sd: 18.0
+  # margin_sd: 12.5
+  # alpha: {pts: 0.07, reb: 0.08, ast: 0.1, fg3m: 0.05, fga: 0.06, fg3a: 0.08}

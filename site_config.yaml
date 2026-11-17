@@ -1,0 +1,21 @@
+# Settings used by the website build (GitHub Actions). Your Mac still uses config.yaml.
+general:
+  output_dir: data              # odds snapshots are kept here (last 21 days)
+  picks_file: data/picks.csv    # tracker log (stored encrypted as picks.csv.enc when a password is set)
+  bankroll: null                # set e.g. 500 to show stakes in dollars
+
+site:
+  sports: [nfl, nba]            # NFL is the home page, NBA the second section
+  password_env: SITE_PASSWORD   # GitHub secret holding your site password (remove it to make the site public)
+
+odds:
+  game_lines_source: espn       # spreads / totals / moneylines from ESPN (DraftKings), free: no credits
+  bookmakers: draftkings,fanduel,betrivers,espnbet,pinnacle   # books priced for player props
+  my_books: [draftkings, fanduel, betrivers, espnbet, bet99, betano, pointsbet]
+  enabled_sports: [nba, nfl]
+  min_credits_left: 30          # stop pulling props before the monthly credits run out
+  prop_markets:                 # about 460 credits a month in total, inside the free 500
+    nba: [player_points, player_points_rebounds_assists]
+    nfl: [player_reception_yds]
+  prop_days:
+    nfl: [Sunday]               # NFL prop odds are bought on Sunday only (most games)

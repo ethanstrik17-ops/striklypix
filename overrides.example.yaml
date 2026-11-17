@@ -1,0 +1,18 @@
+# Pass with:  sportsedge props nba --overrides overrides.yaml
+# The model only knows box scores. Injuries, lineup changes and goalie starters are
+# where most real edges come from, so update this file before each slate.
+
+nba:
+  out:                      # players ruled OUT (their minutes are redistributed to teammates)
+    - Joel Embiid
+  minutes:                  # hard-set projected minutes (e.g. minutes restriction, new starter)
+    Tyrese Maxey: 38
+
+nhl:
+  out:
+    - Auston Matthews
+  minutes:                  # projected TOI in minutes
+    William Nylander: 21
+  goalies:                  # confirmed starters (check DailyFaceoff / team reports)
+    TOR: Anthony Stolarz
+    BOS: Jeremy Swayman
