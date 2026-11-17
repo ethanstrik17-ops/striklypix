@@ -14,8 +14,8 @@ odds:
   my_books: [draftkings, fanduel, betrivers, espnbet, bet99, betano, pointsbet]
   enabled_sports: [nba, nfl]
   min_credits_left: 30          # stop pulling props before the monthly credits run out
-  prop_markets:                 # about 460 credits a month in total, inside the free 500
+  prop_markets:                 # about 470 credits a month in total, inside the free 500
     nba: [player_points, player_points_rebounds_assists]
     nfl: [player_reception_yds]
-  prop_days:
-    nfl: [Sunday]               # NFL prop odds are bought on Sunday only (most games)
+  reuse_props_hours:
+    nfl: 12                     # NFL props are bought in the morning run; the afternoon run reuses them
