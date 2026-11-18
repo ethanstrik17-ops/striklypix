@@ -56,7 +56,9 @@ const S="{b(salt)}",N="{b(nonce)}",C="{b(ct)}",KK="sp_k_"+S;
 const d=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)),en=u=>btoa(String.fromCharCode(...new Uint8Array(u)));
 const ls={{get:k=>{{try{{return localStorage.getItem(k)}}catch(e){{return null}}}},set:(k,v)=>{{try{{localStorage.setItem(k,v)}}catch(e){{}}}},
  del:k=>{{try{{localStorage.removeItem(k)}}catch(e){{}}}}}};
+const ready=()=>document.readyState==='loading'?new Promise(r=>document.addEventListener('DOMContentLoaded',r,{{once:true}})):Promise.resolve();
 async function show(key){{const pt=await crypto.subtle.decrypt({{name:'AES-GCM',iv:d(N)}},key,d(C));
+ await ready();  // replace the whole lock page only once it has finished loading (otherwise its layout leaks in)
  document.open();document.write(new TextDecoder().decode(pt));document.close();}}
 async function derive(pw){{const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);
  return crypto.subtle.deriveKey({{name:'PBKDF2',salt:d(S),iterations:{ITER},hash:'SHA-256'}},base,{{name:'AES-GCM',length:256}},true,['decrypt']);}}
