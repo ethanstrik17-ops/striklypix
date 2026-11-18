@@ -3,6 +3,7 @@ name: Daily card
 on:
   schedule:
     - cron: "15 21 * * *"   # every day ~4:15 PM Toronto (winter) / 5:15 PM (summer): NFL + NBA
+    - cron: "7 17,19,23,1 * * *"   # extra refreshes ~12, 2, 6 and 8 PM Toronto
     - cron: "30 15 * * *"   # every day ~10:30 AM Toronto: NFL only (covers 1 PM, Thanksgiving, Thu/Mon games)
   workflow_dispatch:         # "Run workflow" button to refresh any time
 
