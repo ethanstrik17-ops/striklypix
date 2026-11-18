@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from .card import BOOK_NAMES, STAT_NAMES, tracker_summary
+from .card import BOOK_NAMES, STAT_NAMES, _flag_text, tracker_summary
 from .data.dataset import season_start_year
 from .data.names import norm
 from .trends import wilson
@@ -254,6 +254,37 @@ def _injury_map(ctx) -> dict:
     return out
 
 
+def allowed_ranks(ctx, tb: "TrendBook", stats: list[str]) -> dict:
+    """What each defence gives up per game this season (all opponents' players summed), ranked
+    1 = allows the most. Plus team points allowed under '_pts'."""
+    out = {}
+    pg = ctx.ds.player_games
+    if len(pg) and "game_id" in pg:
+        pg = pg[pg["date"].map(season_start_year) == tb.season]
+        for st in stats:
+            if st not in pg:
+                continue
+            per = pg.groupby(["game_id", "opp"])[st].sum().groupby("opp").mean()
+            if len(per) < 4:
+                continue
+            rk = per.rank(ascending=False, method="min")
+            out[st] = {t: [round(float(v), 1), int(rk[t])] for t, v in per.items()}
+            out[st]["_n"] = int(len(per))
+            out[st]["_avg"] = round(float(per.mean()), 1)
+    tg = tb.tg
+    if len(tg):
+        pa = tg.groupby("team")["pa"].mean()
+        rk = pa.rank(ascending=False, method="min")
+        out["_pts"] = {t: [round(float(v), 1), int(rk[t])] for t, v in pa.items()}
+        out["_pts"]["_n"] = int(len(pa))
+        out["_pts"]["_avg"] = round(float(pa.mean()), 1)
+        pf = tg.groupby("team")["pf"].mean()
+        rk = pf.rank(ascending=False, method="min")
+        out["_pf"] = {t: [round(float(v), 1), int(rk[t])] for t, v in pf.items()}
+        out["_pf"]["_n"] = int(len(pf))
+    return out
+
+
 def build_payload(ctx, card: pd.DataFrame, lists: dict, *, tracker=None, updated="", note="", demo=False) -> dict:
     sport = ctx.sport
     tb = TrendBook(ctx)
@@ -279,6 +310,8 @@ def build_payload(ctx, card: pd.DataFrame, lists: dict, *, tracker=None, updated
                   for d, o, h, m, *vals in zip(g["date"], g["opp"], g["home"], g.get("minutes", pd.Series(0, index=g.index)),
                                                *[g[s] for s in stats])],
             "pj": {s: _f(pr[s], 2) for s in stats if pr is not None and s in pr.index} if pr is not None else {},
+            "mn": _f(pr.get("proj_min"), 1) if pr is not None else None,
+            "fl": _flag_text(pr.get("flags", "")) if pr is not None else "",
         }
     # teams: this season's results
     teams = {}
@@ -319,7 +352,7 @@ def build_payload(ctx, card: pd.DataFrame, lists: dict, *, tracker=None, updated
                 "pk": r["pick"], "pid": _pid(pid),
                 "st": r["market"] if r["type"] == "Prop" else None, "sd": r["side"], "ln": _f(r["point"], 1),
                 "pr": _f(r["price"], 3), "bk": BOOK_NAMES.get(str(r["book"]), str(r["book"])),
-                "p": _f(r["final_p"]), "mp": _f(r["market_p"]), "ev": _f(r["ev"], 4), "fl": r["flag"] or "",
+                "p": _f(r["final_p"]), "mp": _f(r["market_p"]), "mo": _f(r["model_p"]), "ev": _f(r["ev"], 4), "fl": r["flag"] or "",
                 "pj": _f(r["proj"], 2), "tag": r.get("tag", ""),
                 "tm": r.get("team") if r["type"] != "Prop" else None, "tbd": int(bool(r.get("tbd", False))),
                 "why": r["why"] if i in listed else "",
@@ -338,7 +371,7 @@ def build_payload(ctx, card: pd.DataFrame, lists: dict, *, tracker=None, updated
         "games": games, "teams": teams, "players": players, "bets": bets,
         "lists": {k: ids(lists.get(k)) for k in ("best", "props", "long")},
         "hot": hot_hands(card) if len(card) else [], "teamHot": team_hot_hands(card, tb) if len(card) else [],
-        "inj": _injury_map(ctx), "tracker": tr,
+        "inj": _injury_map(ctx), "tracker": tr, "allow": allowed_ranks(ctx, tb, stats),
     })
 
 

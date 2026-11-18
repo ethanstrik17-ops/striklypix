@@ -57,13 +57,18 @@ h2{font-size:17px;margin:20px 0 10px;display:flex;align-items:center;gap:8px}h2 
 .it:last-child{border-bottom:0}.it:hover{background:var(--hover)}.it.sel{background:var(--bluebg)}
 .rk{flex:0 0 24px;height:24px;border-radius:999px;background:var(--ink);color:var(--bg);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
 .it .mid{flex:1;min-width:0}.it .t1{font-weight:700;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.it .t2{color:var(--mut);font-size:12.5px;margin-top:2px}.it .t3{color:var(--ink2);font-size:12.5px;margin-top:3px}
+.it .t2{color:var(--mut);font-size:12.5px;margin-top:2px}.it .t3{color:var(--ink2);font-size:12.5px;margin-top:3px}.it .t4{color:var(--mut);font-size:12.5px;margin-top:3px}
 .it .rt{text-align:right;flex:0 0 auto}.odds{font-weight:750;font-variant-numeric:tabular-nums}.edge{font-size:12px;font-weight:700}
 .pos{color:#4ade80}.neg{color:#f87171}
 .hr{font-weight:800;font-variant-numeric:tabular-nums}.hr.g{color:#4ade80}.hr.m{color:var(--gold)}.hr.b{color:#f87171}
 .add{border:1px solid var(--line);background:var(--card2);border-radius:8px;width:30px;height:30px;font-size:18px;line-height:1;flex:0 0 30px;color:var(--ink2)}
 .add.on{background:var(--accent);color:var(--onacc);border-color:var(--accent)}
-.mut2{color:var(--mut);font-weight:600}.empty{padding:26px;text-align:center;color:var(--mut)}
+.mut2{color:var(--mut);font-weight:600}
+.edgeline{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--ink2)}
+h4.wh{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut)}
+ul.why{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+ul.why li{display:flex;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13.5px;line-height:1.4}
+ul.why li span:first-child{flex:0 0 auto}.empty{padding:26px;text-align:center;color:var(--mut)}
 .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}.tile b{display:block;font-size:20px}.tile span{color:var(--mut);font-size:12px}
 /* trends + game layout */
@@ -182,18 +187,72 @@ function proof(b){const s=summ(b),h=s.L10;if(!h.n)return'';
  return `${b.sd} ${b.ln} in ${t} (both teams' games)`}
 function title(b){if(b.k!=='prop')return b.pk;const P=D.players[b.pid];return `${P?P.n:''} ${b.sd} ${b.ln} ${D.short[b.st]||b.st}`}
 function sub(b){const g=G[b.g];let x=g?`${g.away} @ ${g.home}`:'';if(b.k==='prop'){const P=D.players[b.pid];if(P&&g)x=`${P.t} vs ${P.t===g.home?g.away:g.home}`}return x}
-function verdict(b){const s=summ(b),r10=rate(s.L10),need=1/b.pr;const parts=[];
- if(b.tbd){parts.push(`<b>Line only.</b> DraftKings posted ${b.ln} but not the price yet, so there's no edge to judge. Our projection: ${f1(b.pj)}. It'll show odds and edge once the price is up.`);
-  if(s.szn.n&&s.szn.n<10)parts.push(`Small sample: only ${s.szn.n} games this season.`);return `<div class="verdict">${parts.join(' ')}</div>`}
- if(b.tag==='strong')parts.push(`<b>🎯 Strong.</b> We have an edge (${sgn(b.ev)}) and the trend backs it (${hrTxt(s.L10)} last 10).`);
- else if(b.tag==='trap')parts.push(`<b>🪤 Trap. Don't bet it.</b> It hit ${hrTxt(s.L10)} lately, but at ${amer(b.pr)} the price is too short. Our numbers give it ${pct(b.p)}; it needs ${pct(need)}.`);
- else if(b.fl==='CHECK NEWS')parts.push(`<b>Check the news first.</b> Our number is far from the books; usually that's an injury or lineup change we haven't caught. Not a pick until you've checked.`);
- else if(b.ev>0&&b.fl==='BET')parts.push(`<b>Value.</b> Our chance ${pct(b.p)} vs ${pct(need)} needed at ${amer(b.pr)}.`);
- else if(b.ev>0)parts.push(`<b>Small lean.</b> Slight edge (${sgn(b.ev)}), not much more.`);
- else parts.push(`<b>No edge at this price.</b> Our chance ${pct(b.p)}, it needs ${pct(need)}.`);
- if(s.szn.n&&s.szn.n<10)parts.push(`Small sample: only ${s.szn.n} games this season.`);
- if(r10!=null&&r10>=.8&&b.tag!=='strong'&&b.ev>0&&b.fl!=='CHECK NEWS')parts.push(`Hot streaks usually cool off, so we lean on the price more than the streak.`);
- return `<div class="verdict ${b.tag||''}">${parts.join(' ')}</div>`}
+
+/* ---------------- the "why": every reason for and against, from our own numbers */
+const ord=n=>n+(['th','st','nd','rd'][(n%100>10&&n%100<14)?0:n%10]||'th');
+const sl=st=>(D.statNames[st]||D.short[st]||st).toLowerCase();
+function defRank(st,team,wantMore){const A=(D.allow||{})[st];if(!A||!A[team])return null;const [v,r]=A[team],n=A._n;
+ return{v,r,n,avg:A._avg,top:r<=Math.ceil(n/3),bottom:r>n-Math.ceil(n/3)}}
+function reasons(b){const F=[],W=[];const s=summ(b);const dir=(b.sd==='Under')?-1:1;
+ if(b.k==='prop'){const P=D.players[b.pid];if(!P)return{F,W};const ix=SI(b.st),name=P.n.split(' ').slice(-1)[0];
+  const vals=L=>L.map(r=>r[ix]).filter(v=>v!=null);const cur=P.g.filter(r=>r[4]);
+  const a5=avg(vals(P.g.slice(-5))),a10=avg(vals(P.g.slice(-10))),aS=avg(vals(cur.length?cur:P.g));const pj=P.pj&&P.pj[b.st];
+  if(pj!=null){const d=pj-b.ln;const pctd=Math.abs(d)/Math.max(b.ln,1)*100;
+   if(dir*d>0)F.push(`We project <b>${f1(pj)}</b> ${sl(b.st)}, ${f1(Math.abs(d))} ${d>0?'above':'below'} the ${b.ln} line${pctd>=10?' (a big cushion)':''}.`);
+   else W.push(`Our projection (${f1(pj)}) is on the other side of ${b.ln}.`);
+   if(Math.abs(d)<Math.max(.6,b.ln*.04))W.push(`Projection is right on the line, so this is close to a coin flip.`)}
+  if(a10!=null){if(dir*(a10-b.ln)>0)F.push(`Averaging <b>${f1(a10)}</b> in his last 10 (season ${f1(aS)}).`);else W.push(`Averaging ${f1(a10)} in his last 10, ${dir>0?'under':'over'} the line.`)}
+  if(a10!=null&&aS!=null&&dir*(a10-b.ln)>0&&dir*(aS-b.ln)<0)W.push(`His season average (${f1(aS)}) is on the other side: the recent run could cool off.`);
+  const r10=rate(s.L10),rS=rate(s.szn);
+  if(r10!=null&&s.L10.n>=6){if(r10>=.6)F.push(`Hit ${s.L10.k} of the last ${s.L10.n}${s.streak>=3?`, ${s.streak} in a row`:''}.`);else if(r10<=.4)W.push(`Hit only ${s.L10.k} of the last ${s.L10.n}.`)}
+  if(rS!=null&&s.szn.n>=8&&rS<=.42&&!(r10<=.4))W.push(`Only ${Math.round(rS*100)}% this season (${s.szn.k}/${s.szn.n}).`);
+  if(D.sport==='nba'){const m5=avg(P.g.slice(-5).map(r=>r[3]||0)),mS=avg((cur.length?cur:P.g).map(r=>r[3]||0));
+   if(m5!=null&&mS!=null&&Math.abs(m5-mS)>=3){(dir*(m5-mS)>0?F:W).push(`Minutes ${m5>mS?'up':'down'}: ${f1(m5)} last 5 vs ${f1(mS)} season.`)}
+   if(P.mn!=null&&mS!=null&&Math.abs(P.mn-mS)>=3)(dir*(P.mn-mS)>0?F:W).push(`We expect ${f1(P.mn)} minutes tonight (season ${f1(mS)}).`)}
+  const opp=oppOf(P.t);const dr=opp?defRank(b.st,opp):null;
+  if(dr){const more=`${opp} allows the ${ord(dr.r)}-most ${sl(b.st)} per game (${f1(dr.v)} vs ${f1(dr.avg)} avg)`,fewer=`${opp} allows the ${ord(dr.n-dr.r+1)}-fewest ${sl(b.st)} per game (${f1(dr.v)} vs ${f1(dr.avg)} avg)`;
+   if(dr.top)(dir>0?F:W).push(`Matchup: ${more}.`);else if(dr.bottom)(dir>0?W:F).push(`Matchup: ${fewer}.`)}
+  teammates(b).filter(([k,p])=>outToday(p.n,p.t)).slice(0,2).forEach(([k,p])=>{const wo=series(b,{without:k});if(wo.length<3)return;
+   const wa=avg(wo.map(x=>x.v));const hk=wo.filter(x=>x.hit).length;
+   (dir*(wa-(aS??wa))>=0?F:W).push(`${esc(p.n)} is OUT: without him, ${name} averages ${f1(wa)} (${hk}/${wo.length} on this line).`)});
+  const home=isHomeToday(P.t);if(home!=null){const H=series(b).filter(x=>!!x.h===home);if(H.length>=4){const hr=H.filter(x=>x.hit).length/H.length;
+   if(hr>=.65)F.push(`${home?'Home':'Road'} games: ${H.filter(x=>x.hit).length}/${H.length} on this line.`);else if(hr<=.35)W.push(`${home?'Home':'Road'} games: only ${H.filter(x=>x.hit).length}/${H.length} on this line.`)}}
+  if(opp){const V=series(b).filter(x=>x.o===opp);if(V.length>=2){const k=V.filter(x=>x.hit).length;(k/V.length>=.5?F:W).push(`Vs ${opp}: ${k}/${V.length} on this line.`)}}
+  if(/QUESTIONABLE/.test(P.fl||''))W.push(`He's questionable: check he plays before betting.`);
+  if(/bigger role|extra minutes|starting/.test(P.fl||''))(dir>0?F:W).push(`Bigger role tonight: ${esc(P.fl)}.`);
+  if(s.szn.n&&s.szn.n<8)W.push(`Small sample: ${s.szn.n} games this season.`);
+ }else{const g=G[b.g];if(!g)return{F,W};const team=teamOfBet(b),opp=team?oppOf(team):null;
+  if(b.k==='spread'||b.k==='ml'){const m=team===g.home?g.proj.margin:-g.proj.margin;
+   if(m!=null){if(b.k==='spread'){const c=m+b.ln;(c>0?F:W).push(`We project ${team} ${m>=0?'to win by':'to lose by'} ${f1(Math.abs(m))}; with ${b.ln>0?'+':''}${b.ln} that ${c>0?'covers':'misses'} by ${f1(Math.abs(c))}.`)}
+    else{const wp=team===g.home?g.proj.ph:1-g.proj.ph;(wp>1/b.pr?F:W).push(`We give ${team} a ${pct(wp)} chance to win; the price needs ${pct(1/b.pr)}.`)}}
+   const L=D.teams[team]||[];if(L.length>=5){const l=L.slice(-10),w=l.filter(r=>r[3]>r[4]).length;(w/l.length>=.6?F:w/l.length<=.4?W:F).push(`${team} is ${w}-${l.length-w} in its last ${l.length}.`)}
+   const h=s.L10;if(b.k==='spread'&&h.n>=6)(rate(h)>=.6?F:rate(h)<=.4?W:F).push(`Would have covered today's number in ${h.k} of the last ${h.n}.`);
+   const pd=opp&&(D.allow||{})._pts&&D.allow._pts[opp];if(pd){const [v,r]=pd,n=D.allow._pts._n;if(r<=Math.ceil(n/3))F.push(`${opp}'s defence allows the ${ord(r)}-most points (${f1(v)} a game).`);else if(r>n-Math.ceil(n/3))W.push(`${opp}'s defence is tough: ${ord(n-r+1)}-fewest points allowed (${f1(v)}).`)}}
+  if(b.k==='total'){const t=g.proj.total;if(t!=null){const d=t-b.ln;(dir*d>0?F:W).push(`We project ${f1(t)} total points vs ${b.ln} (${d>0?'+':''}${f1(d)}).`)}
+   [g.home,g.away].forEach(tm=>{const L=(D.teams[tm]||[]).slice(-10);if(L.length>=5){const k=L.filter(r=>dir>0?r[3]+r[4]>b.ln:r[3]+r[4]<b.ln).length,a=avg(L.map(r=>r[3]+r[4]));
+    (k/L.length>=.6?F:k/L.length<=.4?W:F).push(`${tm} games: ${b.sd} ${b.ln} in ${k}/${L.length}, averaging ${f1(a)} total.`)}})}
+  if(b.k==='tt'){const pj=team===g.home?g.proj.home:g.proj.away;if(pj!=null){const d=pj-b.ln;(dir*d>0?F:W).push(`We project ${team} to score ${f1(pj)} vs ${b.ln}.`)}
+   const L=D.teams[team]||[];if(L.length>=5){const a5=avg(L.slice(-5).map(r=>r[3])),aS=avg(L.map(r=>r[3]));(dir*(a5-b.ln)>0?F:W).push(`${team} has scored ${f1(a5)} a game over its last 5 (season ${f1(aS)}).`)}
+   const pd=opp&&(D.allow||{})._pts&&D.allow._pts[opp];if(pd){const [v,r]=pd,n=D.allow._pts._n;if(r<=Math.ceil(n/3))(dir>0?F:W).push(`${opp} allows the ${ord(r)}-most points (${f1(v)} a game).`);else if(r>n-Math.ceil(n/3))(dir>0?W:F).push(`${opp} allows the ${ord(n-r+1)}-fewest points (${f1(v)} a game).`)}}
+  [team,opp].filter(Boolean).forEach(tm=>{const o=(D.inj[tm]||[]).filter(x=>x[2]==='out');if(o.length)((tm===team)===(b.k!=='total'&&dir>0||b.k==='spread'||b.k==='ml')?W:F).push(`${tm} is missing ${o.slice(0,3).map(x=>esc(x[0])).join(', ')}${o.length>3?` +${o.length-3} more`:''}.`)});
+ }
+ if(!b.tbd&&b.mo!=null&&b.mp!=null){const d=b.mo-b.mp;if(Math.abs(d)>=.03)(d>0?F:W).push(`Our model has it at ${pct(b.mo)}; the books (with their cut removed) say ${pct(b.mp)}.`)}
+ return{F:F.slice(0,6),W:W.slice(0,5)}}
+function edgeLine(b){if(b.tbd)return'';const need=1/b.pr;
+ return `At ${amer(b.pr)} this needs to win <b>${pct(need)}</b> of the time to break even. We give it <b>${pct(b.p)}</b>. ${b.ev>0?`That gap is the edge: about <b>+$${(b.ev*100).toFixed(2)}</b> per $100 over the long run.`:`That's short, so long run you'd lose about $${Math.abs(b.ev*100).toFixed(2)} per $100.`}`}
+function verdict(b){const s=summ(b),r10=rate(s.L10),need=1/b.pr;let head,body='',cls=b.tag||'';
+ if(b.tbd){head='Line only.';body=`DraftKings posted ${b.ln} but not the price yet, so there's no edge to judge. It'll show odds and edge once the price is up.`}
+ else if(b.tag==='strong'){head='🎯 Strong pick.';body=`Two things agree: our numbers find an edge (${sgn(b.ev)}) <i>and</i> the recent trend points the same way (${hrTxt(s.L10)} last 10). That combo is what we want before putting money down.`}
+ else if(b.tag==='trap'){head="🪤 Trap. Don't bet it.";body=`It's hit ${hrTxt(s.L10)} lately. That's why it looks tempting, and why the book prices it so short. The streak is already baked into the price, and streaks usually cool off.`}
+ else if(b.fl==='CHECK NEWS'){head='Check the news first.';body=`Our number is far from the books (${pct(b.mo)} vs ${pct(b.mp)}). Usually that means an injury or lineup change we haven't caught. Not a pick until you've checked.`}
+ else if(b.ev>0&&b.fl==='BET'){head='Value pick.';body=`The price is better than it should be. ${r10!=null&&r10<.5?'The recent trend is against it, so it isn\'t tagged Strong; this one is a numbers bet.':''}`}
+ else if(b.ev>0){head='Small lean.';body=`There's a slight edge (${sgn(b.ev)}), but it's thin. Fine to skip.`}
+ else{head='No edge. Pass.';body=`At this price the bet costs you money over time, even if it hits tonight.`}
+ const R=reasons(b);
+ const list=(arr,icon)=>arr.length?`<ul class=why>${arr.map(x=>`<li><span>${icon}</span><span>${x}</span></li>`).join('')}</ul>`:'';
+ return `<div class="verdict ${cls}"><b>${head}</b> ${body}${b.tbd?'':`<div class=edgeline>${edgeLine(b)}</div>`}</div>
+ ${R.F.length?`<h4 class=wh>Why ${b.ev>0||b.tbd?'it can hit':'people like it'}</h4>${list(R.F,'✅')}`:''}
+ ${R.W.length?`<h4 class=wh>Watch out</h4>${list(R.W,'⚠️')}`:''}`}
 
 /* ---------------- parlay slip */
 let slip=[];try{slip=JSON.parse(localStorage.getItem('sp_slip_'+D.sport+'_'+D.date)||'[]').filter(i=>B[i]&&!B[i].tbd)}catch(e){}
@@ -228,9 +287,9 @@ $('#slipbtn').onclick=()=>{renderSlip();$('#slip').classList.add('open')};
 document.querySelectorAll('#slip .sbg,#slip .x').forEach(x=>x.onclick=()=>$('#slip').classList.remove('open'));
 
 /* ---------------- rows */
-function row(b,rank){const s=summ(b),r10=rate(s.L10);
+function row(b,rank){const s=summ(b),r10=rate(s.L10);const top=rank?(reasons(b).F[0]||''):'';
  return `<div class=it data-b="${b.i}">${rank?`<span class=rk>${rank}</span>`:''}<div class=mid><div class=t1>${esc(title(b))} ${tagHtml(b)}</div>
- <div class=t2>${esc(sub(b))}${b.tbd?'':' · '+esc(b.bk)}</div>${s.L10.n?`<div class=t3>${esc(proof(b))}</div>`:''}</div>
+ <div class=t2>${esc(sub(b))}${b.tbd?'':' · '+esc(b.bk)}</div>${s.L10.n?`<div class=t3>${esc(proof(b))}</div>`:''}${top?`<div class=t4>✅ ${top}</div>`:''}</div>
  <div class=rt><div class=odds>${oddsTxt(b)}</div><div class=edge>${edgeHtml(b)}</div>${s.L10.n?`<div class="hr ${hrCls(r10)}" style="font-size:12px">${hrTxt(s.L10)}</div>`:''}</div>
  ${b.tbd?'<span style="width:30px"></span>':`<button class=add data-i="${b.i}" aria-label="Add to parlay">+</button>`}</div>`}
 function wire(root){root.querySelectorAll('.it[data-b]').forEach(x=>x.onclick=e=>{if(e.target.closest('.add'))return;openBet(+x.dataset.b)});
