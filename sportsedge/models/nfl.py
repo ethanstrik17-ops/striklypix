@@ -273,6 +273,9 @@ class NFLPlayerProjector:
                 "injury_note": notes.get(norm(r.player), ""),
             })
         out = pd.DataFrame(recs)
+        if len(out):
+            out["rush_rec_yds"] = out["rush_yds"] + out["rec_yds"]
+            out["pass_rush_yds"] = out["pass_yds"] + out["rush_yds"]
         keep = (out["targets"] >= 1.5) | (out["rush_att"] >= 3) | (out["pass_att"] >= 10)
         return out[keep].reset_index(drop=True)
 

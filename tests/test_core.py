@@ -411,7 +411,7 @@ def test_site_build_demo(tmp_path):
     out = tmp_path / "docs"
     build_site(cfg, str(out), "2026-11-10", ["nba", "nhl"], demo=True)
     page = (out / "nba.html").read_text()
-    assert "<title>StriklyPix NBA</title>" in page and "href='nhl.html'" in page and 'href="archive/index.html"' in page
+    assert "<title>StriklyPix NBA</title>" in page and "href='nhl.html?v=" in page and 'href="archive/index.html?v=' in page
     assert "Hot Hands" in page and 'data-r=trends' in page and 'data-r=matchups' in page
     import json as _json, re as _re
     d = _json.loads(_re.search(r"const D=(.*?);</script>", page, _re.S).group(1))
@@ -420,7 +420,8 @@ def test_site_build_demo(tmp_path):
     assert {b["i"] for b in d["bets"]} >= set(d["lists"]["best"] + d["hot"])
     assert "<title>StriklyPix NHL</title>" in (out / "nhl.html").read_text()
     arch = (out / "archive" / "nba_2026-11-10.html").read_text()
-    assert "href='../nhl.html'" in arch and 'href="index.html"' in arch
+    assert "href='../nhl.html?v=" in arch and 'href="index.html?v=' in arch
+    assert any(b["k"] == "tt" for b in d["bets"]) and all(len(x) == 2 for x in d["teamHot"])
     assert "nba_2026-11-10.html" in (out / "archive" / "index.html").read_text()
     assert (out / ".nojekyll").exists()
 
@@ -495,6 +496,8 @@ def _nfl_mock(monkeypatch, tmp_path):
                            "current": {"target": {"value": 48.5}}} for a in ("-115", "-105")]
                 items += [{"athlete": ath(pid), "type": {"name": "Anytime Touchdown Scorer"},
                            "odds": {"american": {"value": "+180"}}, "current": {}}]
+                items += [{"athlete": ath(pid), "type": {"name": "Total Receptions (incl. overtime)"},
+                           "current": {"target": {"value": 4.5}}} for _ in range(2)]     # line posted, no price yet
                 items += [{"athlete": ath(pid), "type": {"name": "1st Quarter Receiving Yards"},
                            "odds": {"american": {"value": "-110"}}, "current": {"target": {"value": 9.5}}}]
             return {"count": len(items), "pageCount": 1, "items": items}
@@ -546,7 +549,8 @@ def test_nfl_end_to_end(monkeypatch, tmp_path):
     nflmod.prop_players += list(proj.sort_values("rec_yds").player_id.astype(str).iloc[-3:])
     cfg["general"]["output_dir"] = str(tmp_path / "out")
     po = pipeline.fetch_odds(ctx, prov, "props", demo=False)
-    assert set(po["market"]) == {"rec_yds", "td"} and len(po) == 9
+    assert set(po["market"]) == {"rec_yds", "td", "rec"} and len(po) == 15
+    assert len(ctx.price_tbd) == 3          # one entry per line (both sides)
     ry = po[po["market"] == "rec_yds"]
     assert list(ry["name"][:2]) == ["Over", "Under"] and ry["player"].notna().all()
     pv = pipeline.prop_value(ctx, po)
@@ -556,7 +560,10 @@ def test_nfl_end_to_end(monkeypatch, tmp_path):
     props = card[card["type"] == "Prop"]
     assert props["h"].map(bool).all() and set(card["tag"]) <= {"", "strong", "trap"}
     lists = cardmod.select_lists(card)
+    assert card["tbd"].sum() == 6 and not any(lists[k]["tbd"].any() for k in lists if len(lists[k]))
+    assert set(card.loc[card["tbd"], "tag"]) == {""}
     payload = webapp.build_payload(ctx, card, lists, updated="now")
+    assert sum(b["tbd"] for b in payload["bets"]) == 6
     assert payload["games"][0]["home"] == "BAL" and payload["teams"]["BAL"]
     assert all(b["pid"] in payload["players"] for b in payload["bets"] if b["k"] == "prop")
     page = webapp.render(payload, ["nfl", "nba"], {"nfl": "index.html", "nba": "nba.html"})
@@ -617,3 +624,26 @@ def test_espn_nba_propbets_fixture():
     for _, g in df.groupby(["player_id", "market", "point"]):
         assert list(g["name"]) == ["Over", "Under"]
     assert df["price"].between(1.01, 30).all()
+
+
+def test_espn_team_totals():
+    from sportsedge.data.espn_props import parse_prop_items
+    ref = lambda t: {"$ref": f"http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/{t}?lang=en"}
+    items = [{"team": ref(13), "type": {"name": "Team Total Points"}, "odds": {"american": {"value": v}},
+              "current": {"target": {"value": 114.5}}} for v in ("-110", "-110")]
+    items += [{"team": ref(13), "type": {"name": "Team 1st Half Total Points"}, "odds": {"american": {"value": "-110"}},
+               "current": {"target": {"value": 57.5}}}]
+    df = parse_prop_items("nba", items, "1", None, "LAL", "BOS", team_ids={"13": "LAL", "2": "BOS"})
+    assert list(df["market"]) == ["team_totals"] * 2 and list(df["name"]) == ["Over", "Under"]
+    assert set(df["player"]) == {"LAL"} and df["player_id"].isna().all()
+
+
+def test_espn_nfl_propbets_fixture():
+    """Real ESPN NFL sample (Tue before a Thu game): DraftKings lines without prices, '(incl. overtime)' names."""
+    import json as _json
+    from sportsedge.data.espn_props import parse_prop_items
+    items = _json.loads((FIX / "nfl_propbets.json").read_text())["items"]
+    df = parse_prop_items("nfl", items, "401873066", None, "HOU", "IND", team_ids={"11": "IND", "34": "HOU"})
+    assert {"rec_yds", "rec", "rush_yds", "td"} <= set(df["market"]) and "team_totals" not in set(df["market"])
+    assert df["price"].isna().all()
+    assert (df[df["market"] == "td"]["name"] == "Over").all()

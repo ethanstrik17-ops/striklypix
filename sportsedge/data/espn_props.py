@@ -30,18 +30,29 @@ NFL_TYPES = {"passing yards": "pass_yds", "passing attempts": "pass_att", "pass 
              "passing completions": "pass_cmp", "pass completions": "pass_cmp", "completions": "pass_cmp",
              "passing touchdowns": "pass_td", "touchdown passes": "pass_td", "rushing yards": "rush_yds",
              "rushing attempts": "rush_att", "rush attempts": "rush_att", "carries": "rush_att",
-             "receptions": "rec", "receiving yards": "rec_yds"}
-SKIP = re.compile(r"quarter|half|1st|2nd|3rd|4th|first|milestone|longest|alt|\+|race|period|double|triple")
+             "receptions": "rec", "receiving yards": "rec_yds", "rushing plus receiving yards": "rush_rec_yds",
+             "rushing + receiving yards": "rush_rec_yds", "passing plus rushing yards": "pass_rush_yds",
+             "passing + rushing yards": "pass_rush_yds"}
+SKIP = re.compile(r"quarter|half|1st|2nd|3rd|4th|first|milestone|longest|\balt\b|race|period|double|triple")
 
 
 def _stat(sport: str, type_name: str) -> str | None:
-    t = type_name.strip().lower()
-    if sport == "nfl" and "anytime" in t and "touchdown" in t:
+    t = re.sub(r"\s*\(incl\.? overtime\)", "", type_name.strip().lower())
+    if sport == "nfl" and t in ("anytime touchdown scorer", "anytime td scorer"):
         return "td"
     if SKIP.search(t):
         return None
     t = re.sub(r"^(total|player)\s+", "", t)
     return (NBA_TYPES if sport == "nba" else NFL_TYPES).get(t)
+
+
+TEAM_TOTAL = re.compile(r"^(team )?total points$")
+
+
+def _team(item: dict) -> str | None:
+    ref = (item.get("team") or {}).get("$ref", "")
+    m = re.search(r"/teams/([^/?]+)", ref)
+    return m.group(1) if m else None
 
 
 def _athlete(item: dict) -> str | None:
@@ -78,15 +89,23 @@ def _line(item: dict) -> float | None:
 
 
 def parse_prop_items(sport: str, items: list[dict], event_id: str, commence, home, away,
-                     book: str = "draftkings") -> pd.DataFrame:
+                     book: str = "draftkings", team_ids: dict | None = None) -> pd.DataFrame:
+    """team_ids maps ESPN team id -> our abbreviation (for team totals)."""
     groups: dict[tuple, list] = {}
     for it in items:
+        if "athlete" not in it and _team(it) and team_ids:
+            abbr = team_ids.get(_team(it))
+            line, price = _line(it), _price(it)
+            if abbr in (home, away) and TEAM_TOTAL.match((it.get("type") or {}).get("name", "").strip().lower()) \
+                    and line is not None and price and price > 1:
+                groups.setdefault(("T:" + abbr, "team_totals", line), []).append(price)
+            continue
         aid = _athlete(it)
         stat = _stat(sport, (it.get("type") or {}).get("name", ""))
         if not aid or not stat:
             continue
-        price = _price(it)
-        if price is None or price <= 1:
+        price = _price(it)   # None = DraftKings line posted but no price yet (common for NFL early in the week)
+        if price is not None and price <= 1:
             continue
         line = _line(it)
         if stat == "td":
@@ -97,13 +116,18 @@ def parse_prop_items(sport: str, items: list[dict], event_id: str, commence, hom
     rows = []
     for (aid, stat, line), prices in groups.items():
         names = ("Over", "Under") if len(prices) == 2 else (("Over",) if stat == "td" and len(prices) == 1 else ())
+        if stat == "team_totals" and None in prices:
+            continue   # unpriced team totals come as a whole ladder of lines: no way to tell the main one
+        team = aid[2:] if aid.startswith("T:") else None
         for nm, p in zip(names, prices):
             rows.append({"event_id": str(event_id), "commence": commence, "home": home, "away": away, "book": book,
-                         "market": stat, "name": nm, "player": None, "point": line, "price": p, "player_id": aid})
+                         "market": stat, "name": nm, "player": team, "point": line, "price": p,
+                         "player_id": None if team else aid})
     return pd.DataFrame(rows, columns=COLS + ["player_id"])
 
 
-def fetch_props(sport: str, slate: pd.DataFrame, http, ttl: float = 900, provider_id: int = 100) -> pd.DataFrame:
+def fetch_props(sport: str, slate: pd.DataFrame, http, ttl: float = 900, provider_id: int = 100,
+                team_ids: dict | None = None) -> pd.DataFrame:
     """All DraftKings player props ESPN lists for the games on the slate."""
     if sport not in LEAGUE_PATH or not len(slate):
         return pd.DataFrame(columns=COLS + ["player_id"])
@@ -120,10 +144,12 @@ def fetch_props(sport: str, slate: pd.DataFrame, http, ttl: float = 900, provide
         except RuntimeError as e:
             print(f"  warn: ESPN props for {g.away}@{g.home} unavailable ({str(e)[:80]})", file=sys.stderr)
             continue
-        df = parse_prop_items(sport, items, g.game_id, g.start_utc, g.home, g.away)
+        df = parse_prop_items(sport, items, g.game_id, g.start_utc, g.home, g.away, team_ids=team_ids)
         if len(df):
             n_ok += 1
             frames.append(df)
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=COLS + ["player_id"])
-    print(f"  prop lines: {len(out) // 2} from ESPN/DraftKings for {n_ok}/{len(slate)} games (free)", file=sys.stderr)
+    n_tt = int((out["market"] == "team_totals").sum() // 2) if len(out) else 0
+    print(f"  team totals: {n_tt} lines", file=sys.stderr)
+    print(f"  prop lines: {len(out) // 2 - n_tt} from ESPN/DraftKings for {n_ok}/{len(slate)} games (free)", file=sys.stderr)
     return out

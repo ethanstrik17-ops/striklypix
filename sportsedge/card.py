@@ -24,7 +24,8 @@ STAT_NAMES = {"pts": "Points", "reb": "Rebounds", "ast": "Assists", "fg3m": "Thr
               "blocks": "Blocked shots", "saves": "Saves", "ppp": "Power-play points",
               "pass_yds": "Passing yards", "pass_att": "Pass attempts", "pass_cmp": "Completions",
               "pass_td": "Passing TDs", "rush_yds": "Rushing yards", "rush_att": "Rush attempts", "rec": "Receptions",
-              "rec_yds": "Receiving yards", "targets": "Targets", "td": "Anytime TD"}
+              "rec_yds": "Receiving yards", "targets": "Targets", "td": "Anytime TD",
+              "rush_rec_yds": "Rush + rec yards", "pass_rush_yds": "Pass + rush yards"}
 GROUPS = [("bet", "Bet", "BET"), ("check", "Check", "CHECK NEWS"), ("lean", "Leans", "lean"),
           ("dnt", "Do Not Touch", "")]
 FLAG_NOTES = {"missed_last_game": "missed his team's last game", "minutes_bump": "extra minutes (teammate out)",
@@ -105,12 +106,19 @@ def unify(ctx, game_val: pd.DataFrame, prop_val: pd.DataFrame) -> pd.DataFrame:
         elif r.market == "spreads":
             typ, pick, proj = "Spread", f"{team} {r.point:+g}", margin
             why = f"Projected margin {team} {margin:+.1f} vs spread {r.point:+g}."
+        elif r.market == "team_totals":
+            team = r.player
+            proj = s.get("proj_home" if team == r.home else "proj_away", np.nan)
+            typ, pick = "Team total", f"{team} team total {r.name} {r.point:g}"
+            why = f"Projects {team} to score {proj:.1f} vs team total {r.point:g}."
         else:
             typ, pick, proj = "Total", f"{r.name} {r.point:g} {unit}", s.get("proj_total", np.nan)
             why = f"Projected total {proj:.1f} vs line {r.point:g}."
+            team = None
         why += _move_note(moves.get((r.home, r.away)), r.name, r.market)
         rows.append({"type": typ, "game": game, "pick": pick, "proj": proj, "r": r, "why": why,
-                     "player_flags": "", "player": None, "side": r.name})
+                     "player_flags": "", "player": team if typ == "Team total" else None, "side": r.name,
+                     "team": team})
     notes = (getattr(ctx, "overrides", {}) or {}).get("injury_notes", {}) or {}
     for r in (prop_val.itertuples() if len(prop_val) else []):
         game = f"{r.away} @ {r.home}" if isinstance(r.away, str) else ""
@@ -127,10 +135,13 @@ def unify(ctx, game_val: pd.DataFrame, prop_val: pd.DataFrame) -> pd.DataFrame:
         if inj and "questionable" in str(getattr(r, "flags", "")):
             note = (note + "; " if note else "") + inj
         rows.append({"type": "Prop", "game": game, "pick": pick, "proj": r.proj, "r": r, "why": why,
-                     "player_flags": note, "player": r.player, "side": r.name})
+                     "player_flags": note, "player": r.player, "side": r.name, "team": getattr(r, "team", None)})
+    tbd_keys = getattr(ctx, "price_tbd", set()) or set()
     out = []
     for d in rows:
         r = d.pop("r")
+        tbd = bool(tbd_keys) and d["type"] == "Prop" and \
+            (str(r.event_id), r.market, r.player, float(r.point) if pd.notna(r.point) else 0.0) in tbd_keys
         flag = r.flag if isinstance(r.flag, str) else ""
         why = d["why"]
         if flag == "CHECK NEWS":
@@ -138,7 +149,9 @@ def unify(ctx, game_val: pd.DataFrame, prop_val: pd.DataFrame) -> pd.DataFrame:
         if d["player_flags"]:
             why += f" Note: {d['player_flags']}."
         commence = r.commence if isinstance(r.commence, str) else starts.get((r.home, r.away))
-        out.append({**d, "why": why, "flag": flag, "event_id": r.event_id, "market": r.market,
+        if tbd:
+            flag, why = "", f"Projects {r.proj:.1f} vs line {r.point:g}. DraftKings hasn't posted the price yet."
+        out.append({**d, "why": why, "flag": flag, "tbd": tbd, "event_id": r.event_id, "market": r.market,
                     "player_id": getattr(r, "player_id", None) if d["type"] == "Prop" else None,
                     "point": r.point, "home": r.home, "away": r.away,
                     "price": r.best_price, "book": r.best_book, "model_p": r.model_p, "market_p": r.market_p,
@@ -157,6 +170,8 @@ def select_lists(card: pd.DataFrame, n: int = 10, n_long: int = 5) -> dict:
     if not len(card):
         return {"best": empty, "props": empty, "long": empty}
     ok = card[card["flag"].isin(["BET", "lean"]) & (card["ev"] > 0)]
+    if "tbd" in ok:   # no real price yet: never a pick, never tracked
+        ok = ok[~ok["tbd"].astype(bool)]
     if "tag" in ok:  # Strong picks (edge + trend agree) move up; Traps never make a list
         ok = ok[ok["tag"] != "trap"]
         ok = ok.assign(_score=ok["ev"] + 0.02 * (ok["tag"] == "strong")).sort_values("_score", ascending=False)

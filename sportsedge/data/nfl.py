@@ -206,6 +206,8 @@ class NFLProvider:
         pg, tg = pd.DataFrame(P), pd.DataFrame(T)
         if len(pg):
             pg["minutes"] = 60.0  # placeholder so shared code paths work; NFL uses usage shares instead
+            pg["rush_rec_yds"] = pg["rush_yds"].fillna(0) + pg["rec_yds"].fillna(0)
+            pg["pass_rush_yds"] = pg["pass_yds"].fillna(0) + pg["rush_yds"].fillna(0)
             pg["pos"] = pg["player_id"].map(infer_roles(pg))
         return pg, tg
 

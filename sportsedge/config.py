@@ -86,7 +86,8 @@ DEFAULTS: dict = {
         "prior_weeks": 8,            # last N weeks of last season used as a starting point
         "slate_days": 7,             # NFL page shows games in the next 7 days
         "alpha_floor": {"pass_yds": 0.05, "pass_att": 0.02, "pass_cmp": 0.03, "pass_td": 0.1, "rush_yds": 0.2,
-                        "rush_att": 0.08, "rec": 0.1, "rec_yds": 0.25, "targets": 0.1, "td": 0.05},
+                        "rush_att": 0.08, "rec": 0.1, "rec_yds": 0.25, "targets": 0.1, "td": 0.05,
+                        "rush_rec_yds": 0.2, "pass_rush_yds": 0.05},
         "alpha": {},
     },
     "nhl": {
@@ -116,7 +117,8 @@ PLAYER_STATS = {
     "nba": ["pts", "reb", "ast", "fg3m", "fga", "fg3a", "fta", "stl", "blk", "tov",
             "oreb", "dreb", "pra", "pr", "pa", "ra"],
     "nhl": ["sog", "attempts", "goals", "assists", "points", "hits", "blocks", "ppp"],
-    "nfl": ["pass_yds", "pass_att", "pass_cmp", "pass_td", "rush_yds", "rush_att", "rec", "rec_yds", "targets", "td"],
+    "nfl": ["pass_yds", "pass_att", "pass_cmp", "pass_td", "rush_yds", "rush_att", "rec", "rec_yds", "targets", "td",
+            "rush_rec_yds", "pass_rush_yds"],
 }
 
 # The Odds API market key -> our stat column

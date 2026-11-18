@@ -39,10 +39,11 @@ def lock_page(html: str, password: str, title: str = "StriklyPix", salt: bytes |
     b = lambda x: base64.b64encode(x).decode()
     return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><meta name=robots content="noindex,nofollow">
+<meta http-equiv=Cache-Control content="no-cache"><meta name=theme-color content="#070b16">
 <title>{title}</title><style>
-body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f5f6f8;
+body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b1020;
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#0f172a}}
-body.ask{{background:#0f172a}}form{{display:none;background:#fff;border-radius:16px;padding:28px;width:min(92vw,360px);
+body.ask{{background:#0b1020}}form{{display:none;background:#fff;border-radius:16px;padding:28px;width:min(92vw,360px);
 box-shadow:0 10px 40px rgba(0,0,0,.3)}}body.ask form{{display:block}}
 h1{{font-size:22px;margin:0 0 4px;font-weight:800}}p{{color:#64748b;font-size:13px;margin:0 0 18px}}
 input[type=password]{{width:100%;box-sizing:border-box;font-size:16px;padding:12px;border:1px solid #cbd5e1;border-radius:10px}}

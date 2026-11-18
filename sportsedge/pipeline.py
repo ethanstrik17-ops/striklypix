@@ -15,6 +15,9 @@ from .models.players import GoalieProjector, PlayerProjector
 from .value import evaluate, market_table
 
 
+GAME_MARKETS = ["h2h", "spreads", "totals", "team_totals"]
+
+
 def _now() -> pd.Timestamp:
     return pd.Timestamp.now(tz="UTC")
 
@@ -57,6 +60,7 @@ class Context:
     line_moves: dict = field(default_factory=dict)
     injuries: pd.DataFrame = field(default_factory=pd.DataFrame)
     game_meta: dict = field(default_factory=dict)
+    price_tbd: set = field(default_factory=set)     # (event_id, market, player, point): line posted, no price yet
 
 
 def build(sport: str, date, cfg: dict, provider, overrides: dict | None = None, ds: Dataset | None = None) -> Context:
@@ -168,7 +172,7 @@ def game_table(ctx: Context) -> pd.DataFrame:
 
 # ---------------------------------------------------------------------- value: games
 def game_value(ctx: Context, odds: pd.DataFrame) -> pd.DataFrame:
-    mt = market_table(odds[odds["market"].isin(["h2h", "spreads", "totals"])], ctx.cfg["odds"]["sharp_books"],
+    mt = market_table(odds[odds["market"].isin(GAME_MARKETS)], ctx.cfg["odds"]["sharp_books"],
                       ctx.cfg["odds"].get("my_books"))
     if not len(mt):
         return mt
@@ -183,6 +187,12 @@ def game_value(ctx: Context, odds: pd.DataFrame) -> pd.DataFrame:
             w, p = m.p_ml(r.name)
         elif r.market == "spreads":
             w, p = m.p_cover(r.name, r.point)
+        elif r.market == "team_totals":
+            if r.player not in (r.home, r.away) or not hasattr(m, "p_team_total"):
+                keep.append(False); win.append(np.nan); push.append(np.nan)
+                continue
+            o, p = m.p_team_total("home" if r.player == r.home else "away", r.point)
+            w = o if r.name == "Over" else 1 - o - p
         else:
             o, p = m.p_total(r.point)
             w = o if r.name == "Over" else 1 - o - p
@@ -200,12 +210,14 @@ def _label(r) -> str:
         return f"{r.home if r.name == 'home' else r.away} {r.point:+g}"
     if r.market == "totals":
         return f"{r.away}@{r.home} {r.name} {r.point:g}"
+    if r.market == "team_totals":
+        return f"{r.player} team total {r.name} {r.point:g}"
     return f"{r.player} {r.name} {r.point:g} {r.market}"
 
 
 # ---------------------------------------------------------------------- value: props
 def prop_value(ctx: Context, odds: pd.DataFrame) -> pd.DataFrame:
-    props = odds[~odds["market"].isin(["h2h", "spreads", "totals"])]
+    props = odds[~odds["market"].isin(GAME_MARKETS)]
     mt = market_table(props, ctx.cfg["odds"]["sharp_books"],
                       ctx.cfg["odds"].get("my_books"))
     if not len(mt) or not len(ctx.proj):
@@ -279,21 +291,30 @@ def espn_props(ctx: Context) -> pd.DataFrame:
     from .data.espn_props import fetch_props
     from .data.http import CachedClient
     http = CachedClient(os.path.join(ctx.cfg["general"]["cache_dir"], "espn_props"), delay=0.25)
-    df = fetch_props(ctx.sport, ctx.slate, http)
+    team_ids = {m[side]["id"]: m[side]["abbr"] for m in (ctx.game_meta or {}).values()
+                for side in ("home", "away") if isinstance(m.get(side), dict) and m[side].get("id")}
+    df = fetch_props(ctx.sport, ctx.slate, http, team_ids=team_ids)
     if not len(df):
-        return df
+        return df.drop(columns=["player_id"], errors="ignore")
     pg = ctx.ds.player_games.sort_values("date")
     names = dict(zip(pg["player_id"].astype(str), pg["player"]))
     if len(ctx.proj):
         names.update(dict(zip(ctx.proj["player_id"].astype(str), ctx.proj["player"])))
-    df["player"] = df["player_id"].astype(str).map(names)
+    tt = df["market"] == "team_totals"
+    df.loc[~tt, "player"] = df.loc[~tt, "player_id"].astype(str).map(names)
     df = df[df["player"].notna()]
+    tbd = df["price"].isna()
+    if tbd.any():  # DraftKings posted the line but not the price yet: keep the line for trends, assume -110
+        ctx.price_tbd |= {(str(e), m, p, float(pt)) for e, m, p, pt in
+                          zip(df.loc[tbd, "event_id"], df.loc[tbd, "market"], df.loc[tbd, "player"], df.loc[tbd, "point"])}
+        print(f"  {int(tbd.sum())} prop lines have no price yet (shown as line only)", file=sys.stderr)
+        df = df.assign(price=df["price"].fillna(1.909))
     try:
         from pathlib import Path
         snap = Path(ctx.cfg["general"]["output_dir"]) / "odds_snapshots"
         snap.mkdir(parents=True, exist_ok=True)
         ts = _now().strftime("%Y%m%dT%H%M%S")
-        df.drop(columns=["player_id"]).assign(snapshot_utc=ts).to_csv(snap / f"{ctx.sport}_props_{ts}.csv", index=False)
+        df[~tbd].drop(columns=["player_id"]).assign(snapshot_utc=ts).to_csv(snap / f"{ctx.sport}_props_{ts}.csv", index=False)
     except OSError:
         pass
     return df.drop(columns=["player_id"])

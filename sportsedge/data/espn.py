@@ -162,7 +162,7 @@ def game_meta(sport: str, comp: dict) -> dict:
         t = c.get("team") or {}
         recs = {str(r.get("type") or r.get("name") or "").lower(): r.get("summary") for r in c.get("records") or []}
         out[c.get("homeAway", "")] = {
-            "abbr": espn_team(sport, t), "name": t.get("shortDisplayName") or t.get("name") or "",
+            "abbr": espn_team(sport, t), "id": str(t.get("id") or ""), "name": t.get("shortDisplayName") or t.get("name") or "",
             "full": t.get("displayName") or "", "color": "#" + str(t.get("color") or "334155").lstrip("#"),
             "rec": recs.get("total") or recs.get("overall") or "", "home": recs.get("home") or "",
             "road": recs.get("road") or recs.get("away") or ""}

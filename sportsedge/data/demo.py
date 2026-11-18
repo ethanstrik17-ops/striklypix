@@ -308,6 +308,8 @@ class DemoProvider:
                         if row["name"] == "away":
                             row["point"] = -sp
                     two_way(ev, g, "h2h", None, np.nan, float(norm.cdf(mar / 12.5)), ("home", "away"))
+                    for team, pts in ((g.home, th), (g.away, ta)):
+                        two_way(ev, g, "team_totals", team, round(pts * r.normal(1, 0.01) * 2) / 2, 0.5)
                 else:
                     tot = th + ta
                     line = 6.5 if tot > 6.0 else 5.5

@@ -17,15 +17,16 @@ from .data.names import norm
 from .trends import wilson
 
 LOG_STATS = {"nba": ["pts", "reb", "ast", "fg3m", "stl", "blk", "tov", "pra", "pr", "pa", "ra"],
-             "nfl": ["pass_yds", "pass_att", "pass_cmp", "pass_td", "rush_yds", "rush_att", "rec", "rec_yds",
-                     "targets", "td"],
+             "nfl": ["rec_yds", "rec", "targets", "rush_yds", "rush_att", "rush_rec_yds", "pass_yds", "pass_att",
+                     "pass_cmp", "pass_td", "pass_rush_yds", "td"],
              "nhl": ["sog", "goals", "assists", "points", "hits", "blocks"]}
 SHORT = {"pts": "PTS", "reb": "REB", "ast": "AST", "fg3m": "3PM", "stl": "STL", "blk": "BLK", "tov": "TOV",
          "pra": "PRA", "pr": "P+R", "pa": "P+A", "ra": "R+A", "pass_yds": "Pass yds", "pass_att": "Pass att",
          "pass_cmp": "Comp", "pass_td": "Pass TD", "rush_yds": "Rush yds", "rush_att": "Rush att", "rec": "Rec",
-         "rec_yds": "Rec yds", "targets": "Targets", "td": "TD", "sog": "SOG", "goals": "G", "assists": "A",
+         "rec_yds": "Rec yds", "targets": "Targets", "td": "TD", "rush_rec_yds": "Rush+Rec yds",
+         "pass_rush_yds": "Pass+Rush yds", "sog": "SOG", "goals": "G", "assists": "A",
          "points": "P", "hits": "Hits", "blocks": "BLK"}
-TYPE_KEY = {"Prop": "prop", "Moneyline": "ml", "Spread": "spread", "Total": "total"}
+TYPE_KEY = {"Prop": "prop", "Moneyline": "ml", "Spread": "spread", "Total": "total", "Team total": "tt"}
 
 
 def _f(x, nd=3):
@@ -113,7 +114,19 @@ class TrendBook:
         h = hits_for(g[stat].values.astype(float), float(line), side)
         return hit_summary(h, (g["date"].map(season_start_year) == self.season).values)
 
+    def team_total(self, team, point, side):
+        """A team's own games: did the GAME total go over/under `point`?"""
+        g = self.by_team.get(team)
+        if g is None or not len(g):
+            return None
+        return hit_summary(hits_for((g["pf"] + g["pa"]).values.astype(float), float(point), side))
+
     def game(self, typ, team, point, side, home=None, away=None):
+        if typ == "Team total":
+            g = self.by_team.get(team)
+            if g is None or not len(g):
+                return None
+            return hit_summary(hits_for(g["pf"].values.astype(float), float(point), side))
         if typ == "Total":
             parts = [self.by_team.get(t) for t in (home, away)]
             parts = [p for p in parts if p is not None]
@@ -150,11 +163,11 @@ def tag_card(card: pd.DataFrame, tb: TrendBook) -> pd.DataFrame:
             pid = getattr(r, "player_id", None)
             h = tb.prop(pid, stat, r.point, r.side) if pid is not None else None
         else:
-            team = r.home if r.side == "home" else r.away
+            team = getattr(r, "team", None) or (r.home if r.side == "home" else r.away)
             h = tb.game(r.type, team, r.point, r.side, r.home, r.away)
         hs.append(h)
         tag = ""
-        if h:
+        if h and not getattr(r, "tbd", False):
             be = 1 / r.price if r.price else 1
             l10, szn = _rate(h["L10"]), _rate(h["szn"])
             n10 = h["L10"][1]
@@ -181,7 +194,8 @@ def hot_hands(card: pd.DataFrame, n: int = 12) -> list[int]:
             continue
         l10 = k10 / n10
         if l10 >= 0.8 or h["streak"] >= 6:
-            rows.append((i, r["player"], {"strong": 0, "": 1, "trap": 2}[r["tag"]], -l10, -h["streak"], -r["ev"]))
+            ev = -1.0 if r.get("tbd") else r["ev"]
+            rows.append((i, r["player"], {"strong": 0, "": 1, "trap": 2}[r["tag"]], -l10, -h["streak"], -ev))
     rows.sort(key=lambda x: x[2:])
     seen, out = set(), []
     for i, p, *_ in rows:
@@ -194,17 +208,39 @@ def hot_hands(card: pd.DataFrame, n: int = 12) -> list[int]:
     return out
 
 
-def team_hot_hands(card: pd.DataFrame, n: int = 8) -> list[int]:
+def team_hot_hands(card: pd.DataFrame, tb: "TrendBook", n: int = 10) -> list[list]:
+    """Teams on a run against today's lines: winning, covering, team total over/under, and their own
+    games going over/under today's game total. Returns [bet index, team or None]; team is set when the
+    run is one team's games against a game total. One card per team per bet type."""
     if not len(card):
         return []
-    g = card[(card["type"] != "Prop") & card["h"].notna()]
     rows = []
-    for i, r in g.iterrows():
-        k, m = r["h"]["L10"]
+    rank = {"strong": 0, "": 1, "trap": 2}
+    for i, r in card[card["type"] != "Prop"].iterrows():
+        if r["type"] == "Total":
+            for t in (r["home"], r["away"]):
+                h = tb.team_total(t, r["point"], r["side"])
+                if h and h["L10"][1] >= 6 and h["L10"][0] / h["L10"][1] >= 0.7:
+                    rows.append((int(i), t, "total", rank[r["tag"]], -h["L10"][0] / h["L10"][1], -h["streak"], -r["ev"]))
+            continue
+        h = r["h"]
+        if not h:
+            continue
+        k, m = h["L10"]
         if m >= 6 and k / m >= 0.7:
-            rows.append((i, {"strong": 0, "": 1, "trap": 2}[r["tag"]], -k / m, -r["ev"]))
-    rows.sort(key=lambda x: x[1:])
-    return [int(i) for i, *_ in rows[:n]]
+            team = r.get("team") or (r["home"] if r["side"] == "home" else r["away"])
+            rows.append((int(i), None, f"{team}:{r['type']}", rank[r["tag"]], -k / m, -h["streak"], -r["ev"]))
+    rows.sort(key=lambda x: x[3:])
+    seen, out = set(), []
+    for i, t, key, *_ in rows:
+        k = (t or "") + key
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append([i, t])
+        if len(out) >= n:
+            break
+    return out
 
 
 # ---------------------------------------------------------------------- payload
@@ -285,6 +321,7 @@ def build_payload(ctx, card: pd.DataFrame, lists: dict, *, tracker=None, updated
                 "pr": _f(r["price"], 3), "bk": BOOK_NAMES.get(str(r["book"]), str(r["book"])),
                 "p": _f(r["final_p"]), "mp": _f(r["market_p"]), "ev": _f(r["ev"], 4), "fl": r["flag"] or "",
                 "pj": _f(r["proj"], 2), "tag": r.get("tag", ""),
+                "tm": r.get("team") if r["type"] != "Prop" else None, "tbd": int(bool(r.get("tbd", False))),
                 "why": r["why"] if i in listed else "",
             })
     ids = lambda df: [int(i) for i in df.index] if df is not None and len(df) else []
@@ -300,16 +337,20 @@ def build_payload(ctx, card: pd.DataFrame, lists: dict, *, tracker=None, updated
         "stats": stats, "statNames": {s: STAT_NAMES.get(s, s) for s in stats}, "short": {s: SHORT.get(s, s) for s in stats},
         "games": games, "teams": teams, "players": players, "bets": bets,
         "lists": {k: ids(lists.get(k)) for k in ("best", "props", "long")},
-        "hot": hot_hands(card) if len(card) else [], "teamHot": team_hot_hands(card) if len(card) else [],
+        "hot": hot_hands(card) if len(card) else [], "teamHot": team_hot_hands(card, tb) if len(card) else [],
         "inj": _injury_map(ctx), "tracker": tr,
     })
 
 
-def render(payload: dict, nav_sports: list[str], pages: dict) -> str:
+def render(payload: dict, nav_sports: list[str], pages: dict, version: str = "") -> str:
+    """version is added to links (nba.html?v=...) so a click always loads the newest build, never a
+    copy the browser saved earlier."""
     from .webapp_assets import CSS, HTML, JS
     sport = payload["sport"]
-    switch = "".join(f"<a href='{pages.get(s, s + '.html')}' class='{'on' if s == sport else ''}'>{s.upper()}</a>"
+    v = f"?v={version}" if version else ""
+    switch = "".join(f"<a href='{pages.get(s, s + '.html')}{v}' class='{'on' if s == sport else ''}'>{s.upper()}</a>"
                      for s in nav_sports)
+    payload = {**payload, "v": version}
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
     return (HTML.replace("{{CSS}}", CSS).replace("{{JS}}", JS).replace("{{SWITCH}}", switch)
             .replace("{{SPORT}}", sport.upper()).replace("{{DATA}}", data))

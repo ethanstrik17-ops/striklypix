@@ -54,6 +54,9 @@ def build_sport(sport: str, date, cfg: dict, sports: list[str], demo: bool = Fal
     if len(ctx.slate):
         go = pipeline.fetch_odds(ctx, prov, "games", demo)
         po = pipeline.fetch_odds(ctx, prov, "props", demo)
+        if len(po) and (po["market"] == "team_totals").any():  # team totals come with the prop feed
+            go = pd.concat([go, po[po["market"] == "team_totals"]], ignore_index=True)
+            po = po[po["market"] != "team_totals"]
         gv = pipeline.game_value(ctx, go) if len(go) else pd.DataFrame()
         pv = pipeline.prop_value(ctx, po) if len(po) else pd.DataFrame()
         card = cardmod.unify(ctx, gv, pv)
@@ -74,7 +77,7 @@ def build_sport(sport: str, date, cfg: dict, sports: list[str], demo: bool = Fal
         log = pd.read_csv(picks)
         tracker = log[log["sport"] == sport] if len(log) else None
     payload = webapp.build_payload(ctx, card, lists, tracker=tracker, updated=updated, note=note, demo=demo)
-    return webapp.render(payload, sports, PAGE)
+    return webapp.render(payload, sports, PAGE, version=_now_et().strftime("%m%d%H%M"))
 
 
 def _error_page(sport: str, err: str, sports: list[str]) -> str:
@@ -112,10 +115,10 @@ def _archive_index(out: Path, sports: list[str]):
 
 def _fix_archive_links(page: str) -> str:
     """Archived copies live one folder down, so point the nav back up."""
-    for target in ("index.html", "nba.html", "nhl.html"):
-        page = page.replace(f"href='{target}'", f"href='../{target}'")
+    import re
+    page = re.sub(r"href='((?:index|nba|nhl)\.html(?:\?v=\d+)?)'", r"href='../\1'", page)
     return page.replace("href='archive/index.html'", "href='index.html'").replace(
-        'href="archive/index.html"', 'href="index.html"')
+        'href="archive/index.html', 'href="index.html')
 
 
 def prune_snapshots(cfg: dict, keep_days: int = 21):

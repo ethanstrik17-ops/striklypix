@@ -71,7 +71,8 @@ def log_picks(df: pd.DataFrame, sport: str, date, path: str) -> int:
     for c in LOG_COLS:
         if c not in bets:
             bets[c] = np.nan
-    bets["type"] = bets["market"].map(lambda m: {"h2h": "Moneyline", "spreads": "Spread", "totals": "Total"}.get(m, "Prop"))
+    bets["type"] = bets["market"].map(lambda m: {"h2h": "Moneyline", "spreads": "Spread", "totals": "Total",
+                                                     "team_totals": "Team total"}.get(m, "Prop"))
     bets["category"] = "Manual log"
     return _append(bets, path)
 
@@ -112,7 +113,12 @@ def grade(path: str, sport: str, ds, cfg: dict) -> pd.DataFrame:
     for i, r in log[(log["sport"] == sport) & log["result"].isna()].iterrows():
         d = pd.Timestamp(r["date"])
         res = None
-        if r["market"] in ("h2h", "spreads", "totals"):
+        if r["market"] == "team_totals" and isinstance(r["player"], str):
+            g = tg[(tg["date"] == d) & (tg["team"] == r["player"])]
+            if len(g):
+                v = g.iloc[0]["pf"] - r["point"]
+                res = "P" if v == 0 else ("W" if (v > 0) == (r["name"] == "Over") else "L")
+        elif r["market"] in ("h2h", "spreads", "totals"):
             g = tg[(tg["date"] == d) & (tg["team"] == r["home"])]
             if len(g):
                 g = g.iloc[0]
