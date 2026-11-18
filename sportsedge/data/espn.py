@@ -151,3 +151,19 @@ def merge_overrides(manual: dict, auto: dict) -> dict:
         else:
             out[k] = v
     return out
+
+
+def game_meta(sport: str, comp: dict) -> dict:
+    """Venue, team names/colours and current records from an ESPN scoreboard competition."""
+    v = comp.get("venue") or {}
+    addr = v.get("address") or {}
+    out = {"venue": v.get("fullName") or "", "city": ", ".join(x for x in (addr.get("city"), addr.get("state")) if x)}
+    for c in comp.get("competitors", []):
+        t = c.get("team") or {}
+        recs = {str(r.get("type") or r.get("name") or "").lower(): r.get("summary") for r in c.get("records") or []}
+        out[c.get("homeAway", "")] = {
+            "abbr": espn_team(sport, t), "name": t.get("shortDisplayName") or t.get("name") or "",
+            "full": t.get("displayName") or "", "color": "#" + str(t.get("color") or "334155").lstrip("#"),
+            "rec": recs.get("total") or recs.get("overall") or "", "home": recs.get("home") or "",
+            "road": recs.get("road") or recs.get("away") or ""}
+    return out

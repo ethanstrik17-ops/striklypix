@@ -139,6 +139,7 @@ def unify(ctx, game_val: pd.DataFrame, prop_val: pd.DataFrame) -> pd.DataFrame:
             why += f" Note: {d['player_flags']}."
         commence = r.commence if isinstance(r.commence, str) else starts.get((r.home, r.away))
         out.append({**d, "why": why, "flag": flag, "event_id": r.event_id, "market": r.market,
+                    "player_id": getattr(r, "player_id", None) if d["type"] == "Prop" else None,
                     "point": r.point, "home": r.home, "away": r.away,
                     "price": r.best_price, "book": r.best_book, "model_p": r.model_p, "market_p": r.market_p,
                     "final_p": r.final_p, "ev": r.ev, "stake_pct": r.stake_pct,
@@ -155,7 +156,13 @@ def select_lists(card: pd.DataFrame, n: int = 10, n_long: int = 5) -> dict:
     empty = card.iloc[0:0] if len(card) else pd.DataFrame()
     if not len(card):
         return {"best": empty, "props": empty, "long": empty}
-    ok = card[card["flag"].isin(["BET", "lean"]) & (card["ev"] > 0)].sort_values("ev", ascending=False)
+    ok = card[card["flag"].isin(["BET", "lean"]) & (card["ev"] > 0)]
+    if "tag" in ok:  # Strong picks (edge + trend agree) move up; Traps never make a list
+        ok = ok[ok["tag"] != "trap"]
+        ok = ok.assign(_score=ok["ev"] + 0.02 * (ok["tag"] == "strong")).sort_values("_score", ascending=False)
+        ok = ok.drop(columns=["_score"])
+    else:
+        ok = ok.sort_values("ev", ascending=False)
 
     def pick(df, limit, per_game=2):
         chosen, players, games = [], set(), {}

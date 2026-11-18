@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .dataset import Dataset
-from .espn import espn_team, parse_injuries, parse_odds
+from .espn import espn_team, game_meta, parse_injuries, parse_odds
 from .http import CachedClient
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
@@ -100,13 +100,14 @@ class NFLProvider:
                 evs += self._events(self._week(nfl_season_year(date), wk + 1, ttl=900))
             except RuntimeError:
                 pass
-        seen, rows, self._odds = set(), [], []
+        seen, rows, self._odds, self.game_meta = set(), [], [], {}
         for e in evs:
             if e["game_id"] in seen or e["completed"] or e["state"] != "pre" or e["date"] is None:
                 continue
             if not (date <= e["date"] < date + pd.Timedelta(days=self.slate_days)):
                 continue
             seen.add(e["game_id"])
+            self.game_meta[e["game_id"]] = game_meta("nfl", e["_comp"])
             rows.append({k: e[k] for k in ("game_id", "date", "start_utc", "home", "away", "state")})
             r, mv = parse_odds("nfl", e["game_id"], e["_comp"], e["start_utc"])
             self._odds += r

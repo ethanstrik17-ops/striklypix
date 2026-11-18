@@ -56,6 +56,7 @@ class Context:
     goalie_proj: pd.DataFrame = field(default_factory=pd.DataFrame)
     line_moves: dict = field(default_factory=dict)
     injuries: pd.DataFrame = field(default_factory=pd.DataFrame)
+    game_meta: dict = field(default_factory=dict)
 
 
 def build(sport: str, date, cfg: dict, provider, overrides: dict | None = None, ds: Dataset | None = None) -> Context:
@@ -76,6 +77,7 @@ def build(sport: str, date, cfg: dict, provider, overrides: dict | None = None, 
     ctx = Context(sport, date, cfg, ds, slate, overrides)
     ctx.line_moves = getattr(provider, "line_moves", {})
     ctx.injuries = inj
+    ctx.game_meta = getattr(provider, "game_meta", {}) or {}
     if not len(slate):
         print(f"No {sport.upper()} games on {date.date()}.", file=sys.stderr)
         return ctx
@@ -271,6 +273,32 @@ def recent_prop_snapshot(ctx: Context):
     return df[[c for c in COLS if c in df]], ts.tz_convert("America/Toronto").strftime("%-I:%M %p")
 
 
+def espn_props(ctx: Context) -> pd.DataFrame:
+    """Free DraftKings player props from ESPN, with names filled in from our own box scores."""
+    import os
+    from .data.espn_props import fetch_props
+    from .data.http import CachedClient
+    http = CachedClient(os.path.join(ctx.cfg["general"]["cache_dir"], "espn_props"), delay=0.25)
+    df = fetch_props(ctx.sport, ctx.slate, http)
+    if not len(df):
+        return df
+    pg = ctx.ds.player_games.sort_values("date")
+    names = dict(zip(pg["player_id"].astype(str), pg["player"]))
+    if len(ctx.proj):
+        names.update(dict(zip(ctx.proj["player_id"].astype(str), ctx.proj["player"])))
+    df["player"] = df["player_id"].astype(str).map(names)
+    df = df[df["player"].notna()]
+    try:
+        from pathlib import Path
+        snap = Path(ctx.cfg["general"]["output_dir"]) / "odds_snapshots"
+        snap.mkdir(parents=True, exist_ok=True)
+        ts = _now().strftime("%Y%m%dT%H%M%S")
+        df.drop(columns=["player_id"]).assign(snapshot_utc=ts).to_csv(snap / f"{ctx.sport}_props_{ts}.csv", index=False)
+    except OSError:
+        pass
+    return df.drop(columns=["player_id"])
+
+
 def fetch_odds(ctx: Context, provider, kind: str, demo: bool, lines_csv: str | None = None) -> pd.DataFrame:
     from .data.odds import COLS, OddsClient, et_date, load_manual_lines
     frames = []
@@ -288,6 +316,8 @@ def fetch_odds(ctx: Context, provider, kind: str, demo: bool, lines_csv: str | N
             from .data.espn import odds_frame
             frames.append(odds_frame(provider.espn_game_odds()))
             print("  game lines: free ESPN feed (no credits used)", file=sys.stderr)
+        elif kind == "props" and ctx.cfg["odds"].get("props_source", "espn") == "espn" and ctx.sport in ("nba", "nfl"):
+            frames.append(espn_props(ctx))
         elif kind == "props" and days and today not in days:
             print(f"  ({ctx.sport.upper()} prop odds only pulled on {', '.join(days)} to save credits)", file=sys.stderr)
         elif ctx.sport not in enabled:

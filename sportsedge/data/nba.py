@@ -187,7 +187,9 @@ class NBAProvider:
     def _espn_slate(self, date) -> pd.DataFrame:
         from .espn import parse_odds
         rows = [r for r in self._espn_day(pd.Timestamp(date).normalize()) if not r["completed"]]
+        from .espn import game_meta
         self._odds, self.line_moves = [], {}
+        self.game_meta = {r["game_id"]: game_meta("nba", r["_comp"]) for r in rows if r.get("_comp")}
         for r in rows:
             if r.get("state") == "pre":
                 o, mv = parse_odds("nba", r["game_id"], r["_comp"], r["start_utc"])

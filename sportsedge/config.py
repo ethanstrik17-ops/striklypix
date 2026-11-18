@@ -27,7 +27,9 @@ DEFAULTS: dict = {
         "min_credits_left": 0,         # stop fetching props when credits would drop below this
         "enabled_sports": ["nba", "nhl", "nfl"],  # sports that fetch prop odds (others: projections only)
         "game_lines_source": "espn",   # "espn" = free DraftKings lines from ESPN; "oddsapi" = multi-book, costs credits
+        "props_source": "espn",        # "espn" = free DraftKings player props for NBA/NFL; "oddsapi" = paid multi-book
         "prop_days": {},               # e.g. {"nfl": ["Sunday"]}: only buy prop odds on these days
+        "reuse_props_hours": {},       # e.g. {"nfl": 12}: later runs the same day reuse the morning's prop prices
         "my_books": None,              # books you can bet at; best price is only taken from these
         "sharp_books": ["pinnacle", "circasports", "lowvig", "betonlineag"],
         "prop_markets": {

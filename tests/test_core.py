@@ -405,15 +405,22 @@ def test_site_build_demo(tmp_path):
     from sportsedge.site import build_site
     cfg = load_config("site_config.yaml")
     assert cfg["value"]["min_ev"] == 0.03  # merged with defaults
+    cfg["odds"]["my_books"] = None          # demo books aren't real Ontario books
     cfg["general"]["output_dir"] = str(tmp_path / "data")
     cfg["general"]["picks_file"] = str(tmp_path / "data" / "picks.csv")
     out = tmp_path / "docs"
     build_site(cfg, str(out), "2026-11-10", ["nba", "nhl"], demo=True)
     page = (out / "nba.html").read_text()
-    assert "Strikly<span class=px>Pix</span> <span class=sp>NBA</span>" in page and "href='nhl.html'" in page and "href='archive/index.html'" in page
-    assert "<span class=sp>NHL</span>" in (out / "nhl.html").read_text()
+    assert "<title>StriklyPix NBA</title>" in page and "href='nhl.html'" in page and 'href="archive/index.html"' in page
+    assert "Hot Hands" in page and 'data-r=trends' in page and 'data-r=matchups' in page
+    import json as _json, re as _re
+    d = _json.loads(_re.search(r"const D=(.*?);</script>", page, _re.S).group(1))
+    assert d["games"] and d["bets"] and d["players"] and d["lists"]["best"]
+    assert all(b["pid"] in d["players"] for b in d["bets"] if b["k"] == "prop")   # every prop links to a game log
+    assert {b["i"] for b in d["bets"]} >= set(d["lists"]["best"] + d["hot"])
+    assert "<title>StriklyPix NHL</title>" in (out / "nhl.html").read_text()
     arch = (out / "archive" / "nba_2026-11-10.html").read_text()
-    assert "href='../nhl.html'" in arch
+    assert "href='../nhl.html'" in arch and 'href="index.html"' in arch
     assert "nba_2026-11-10.html" in (out / "archive" / "index.html").read_text()
     assert (out / ".nojekyll").exists()
 
@@ -480,12 +487,25 @@ def _nfl_mock(monkeypatch, tmp_path):
             if not params:
                 return scoreboard
             return {"events": week_events(int(params["dates"]), int(params["week"]))}
+        if url.endswith("/propBets"):
+            ath = lambda pid: {"$ref": f"http://sports.core.api.espn.com/v2/sports/football/athletes/{pid}?lang=en"}
+            items = []
+            for pid in prop_players:
+                items += [{"athlete": ath(pid), "type": {"name": "Total Receiving Yards"}, "odds": {"american": {"value": a}},
+                           "current": {"target": {"value": 48.5}}} for a in ("-115", "-105")]
+                items += [{"athlete": ath(pid), "type": {"name": "Anytime Touchdown Scorer"},
+                           "odds": {"american": {"value": "+180"}}, "current": {}}]
+                items += [{"athlete": ath(pid), "type": {"name": "1st Quarter Receiving Yards"},
+                           "odds": {"american": {"value": "-110"}}, "current": {"target": {"value": 9.5}}}]
+            return {"count": len(items), "pageCount": 1, "items": items}
         if url.endswith("/summary"):
             gid = params["event"]
             w, h, a, day, hs, as_ = games[gid]
             return summary(gid, h, a, hs, as_)
         raise AssertionError(url)
 
+    prop_players = []
+    nflmod.prop_players = prop_players
     monkeypatch.setattr(nflmod.CachedClient, "get_json", fake_get)
     cfg = load_config()
     cfg["general"]["cache_dir"] = str(tmp_path)
@@ -522,6 +542,26 @@ def test_nfl_end_to_end(monkeypatch, tmp_path):
     card = cardmod.unify(ctx, gv, pv)
     assert {"Moneyline", "Spread", "Total", "Prop"} <= set(card["type"])
 
+    # free ESPN / DraftKings props: Over listed first, Under second; quarter props ignored; names from box scores
+    nflmod.prop_players += list(proj.sort_values("rec_yds").player_id.astype(str).iloc[-3:])
+    cfg["general"]["output_dir"] = str(tmp_path / "out")
+    po = pipeline.fetch_odds(ctx, prov, "props", demo=False)
+    assert set(po["market"]) == {"rec_yds", "td"} and len(po) == 9
+    ry = po[po["market"] == "rec_yds"]
+    assert list(ry["name"][:2]) == ["Over", "Under"] and ry["player"].notna().all()
+    pv = pipeline.prop_value(ctx, po)
+    card = cardmod.unify(ctx, gv, pv)
+    from sportsedge import webapp
+    card = webapp.tag_card(card, webapp.TrendBook(ctx))
+    props = card[card["type"] == "Prop"]
+    assert props["h"].map(bool).all() and set(card["tag"]) <= {"", "strong", "trap"}
+    lists = cardmod.select_lists(card)
+    payload = webapp.build_payload(ctx, card, lists, updated="now")
+    assert payload["games"][0]["home"] == "BAL" and payload["teams"]["BAL"]
+    assert all(b["pid"] in payload["players"] for b in payload["bets"] if b["k"] == "prop")
+    page = webapp.render(payload, ["nfl", "nba"], {"nfl": "index.html", "nba": "nba.html"})
+    assert "const D={" in page and "</script>" not in page.split("const D=")[1].split(";</script>")[0]
+
 
 def test_password_protection_roundtrip(tmp_path, monkeypatch):
     from sportsedge.protect import decrypt_bytes, encrypt_bytes, lock_page
@@ -539,3 +579,41 @@ def test_password_protection_roundtrip(tmp_path, monkeypatch):
     build_site(cfg, str(tmp_path / "docs"), "2026-11-10", ["nba"], demo=True)
     html = (tmp_path / "docs" / "nba.html").read_text()
     assert "Top 10 Bets" not in html and "Private page" in html
+
+
+def test_prop_snapshot_reuse(tmp_path, monkeypatch):
+    cfg = load_config("site_config.yaml")
+    cfg["general"]["output_dir"] = str(tmp_path)
+    cfg["odds"]["reuse_props_hours"] = {"nfl": 12}
+    snap = tmp_path / "odds_snapshots"
+    snap.mkdir()
+    rows = pd.DataFrame([{"event_id": "e", "commence": "2026-11-26T21:30:00Z", "home": "DAL", "away": "KC",
+                          "book": "fanduel", "market": "rec_yds", "name": n, "player": "X Y", "point": 55.5,
+                          "price": 1.9, "snapshot_utc": "20261126T153500"} for n in ("Over", "Under")])
+    rows.to_csv(snap / "nfl_props_20261126T153500.csv", index=False)
+
+    class C:
+        pass
+    ctx = C()
+    ctx.sport, ctx.cfg = "nfl", cfg
+    monkeypatch.setattr(pipeline, "_now", lambda: pd.Timestamp("2026-11-26T21:15Z"))   # same day, afternoon
+    df, when = pipeline.recent_prop_snapshot(ctx)
+    assert len(df) == 2 and when == "10:35 AM"
+    monkeypatch.setattr(pipeline, "_now", lambda: pd.Timestamp("2026-11-27T16:00Z"))   # next day: buy fresh
+    assert pipeline.recent_prop_snapshot(ctx) is None
+    ctx.sport = "nba"                                                                 # NBA: never reused
+    assert pipeline.recent_prop_snapshot(ctx) is None
+
+
+def test_espn_nba_propbets_fixture():
+    """Real ESPN/DraftKings sample: Over first, Under second; combos mapped; double-doubles and team props skipped."""
+    import json as _json
+    from sportsedge.data.espn_props import parse_prop_items
+    items = _json.loads((FIX / "nba_propbets.json").read_text())["items"]
+    df = parse_prop_items("nba", items, "401910006", "2026-11-17T00:00Z", "HOME", "AWAY")
+    assert len(df) and len(df) % 2 == 0
+    assert set(df["market"]) <= {"pts", "reb", "ast", "fg3m", "stl", "blk", "tov", "pra", "pr", "pa", "ra"}
+    assert {"pts", "pra"} <= set(df["market"])
+    for _, g in df.groupby(["player_id", "market", "point"]):
+        assert list(g["name"]) == ["Over", "Under"]
+    assert df["price"].between(1.01, 30).all()

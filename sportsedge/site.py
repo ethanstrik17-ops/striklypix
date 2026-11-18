@@ -39,7 +39,7 @@ def _sub_nav(nav):
 
 
 def build_sport(sport: str, date, cfg: dict, sports: list[str], demo: bool = False) -> str:
-    from . import trends
+    from . import webapp
     prov = pipeline.get_provider(sport, cfg, demo)
     ctx = pipeline.build(sport, date, cfg, prov, {})
     nav = _nav(sport, sports)
@@ -50,32 +50,31 @@ def build_sport(sport: str, date, cfg: dict, sports: list[str], demo: bool = Fal
     except Exception as e:  # never let grading break the page
         print(f"  warn: grading failed: {e}", file=sys.stderr)
     card = cardmod.unify(ctx, pd.DataFrame(), pd.DataFrame())
-    lists, parlays, form, note = cardmod.select_lists(card), [], None, ""
+    lists, note = cardmod.select_lists(card), ""
     if len(ctx.slate):
         go = pipeline.fetch_odds(ctx, prov, "games", demo)
         po = pipeline.fetch_odds(ctx, prov, "props", demo)
         gv = pipeline.game_value(ctx, go) if len(go) else pd.DataFrame()
         pv = pipeline.prop_value(ctx, po) if len(po) else pd.DataFrame()
         card = cardmod.unify(ctx, gv, pv)
+        try:
+            card = webapp.tag_card(card, webapp.TrendBook(ctx))
+        except Exception as e:  # trends are a bonus: never let them break the card
+            print(f"  warn: trend tags failed: {e}", file=sys.stderr)
         lists = cardmod.select_lists(card)
-        parlays = cardmod.build_parlays(card, cfg["value"])
         if not demo:
             n = ledger.log_card(lists, sport, picks)
             print(f"  tracker: logged {n} new picks", file=sys.stderr)
-        try:
-            form = trends.form_scan(ctx.ds.player_games, ctx.proj, FORM_STATS.get(sport, []), sport) if len(ctx.proj) else None
-        except Exception as e:
-            print(f"  warn: streak scan failed: {e}", file=sys.stderr)
         if not len(po):
-            note = "No prop odds pulled for this build (credit budget or schedule)."
+            note = "No player prop lines posted yet. They usually appear the day before the game."
     else:
         note = "No games on the schedule."
     tracker = None
     if Path(picks).exists():
         log = pd.read_csv(picks)
         tracker = log[log["sport"] == sport] if len(log) else None
-    return cardmod.render_page(ctx, card, lists, parlays, form=form, injuries=ctx.injuries, tracker=tracker,
-                               bankroll=cfg["general"].get("bankroll"), demo=demo, note=note, nav=nav, updated=updated)
+    payload = webapp.build_payload(ctx, card, lists, tracker=tracker, updated=updated, note=note, demo=demo)
+    return webapp.render(payload, sports, PAGE)
 
 
 def _error_page(sport: str, err: str, sports: list[str]) -> str:
@@ -115,7 +114,8 @@ def _fix_archive_links(page: str) -> str:
     """Archived copies live one folder down, so point the nav back up."""
     for target in ("index.html", "nba.html", "nhl.html"):
         page = page.replace(f"href='{target}'", f"href='../{target}'")
-    return page.replace("href='archive/index.html'", "href='index.html'")
+    return page.replace("href='archive/index.html'", "href='index.html'").replace(
+        'href="archive/index.html"', 'href="index.html"')
 
 
 def prune_snapshots(cfg: dict, keep_days: int = 21):

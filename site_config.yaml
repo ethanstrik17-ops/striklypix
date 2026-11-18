@@ -9,13 +9,7 @@ site:
   password_env: SITE_PASSWORD   # GitHub secret holding your site password (remove it to make the site public)
 
 odds:
-  game_lines_source: espn       # spreads / totals / moneylines from ESPN (DraftKings), free: no credits
-  bookmakers: draftkings,fanduel,betrivers,espnbet,pinnacle   # books priced for player props
+  game_lines_source: espn       # spreads / totals / moneylines from ESPN (DraftKings), free
+  props_source: espn            # every player prop from ESPN (DraftKings), free: no credits, no API key needed
   my_books: [draftkings, fanduel, betrivers, espnbet, bet99, betano, pointsbet]
   enabled_sports: [nba, nfl]
-  min_credits_left: 30          # stop pulling props before the monthly credits run out
-  prop_markets:                 # about 470 credits a month in total, inside the free 500
-    nba: [player_points, player_points_rebounds_assists]
-    nfl: [player_reception_yds]
-  reuse_props_hours:
-    nfl: 12                     # NFL props are bought in the morning run; the afternoon run reuses them
